@@ -1,0 +1,13 @@
+{
+  "name": "bloodarena-push-server",
+  "version": "1.0.0",
+  "description": "Blood Arena Web Push Notification Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "web-push": "^3.6.7"
+  }
+}
