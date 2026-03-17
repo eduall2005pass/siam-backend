@@ -17,7 +17,7 @@ const VAPID_SUBJECT = 'mailto:admin@bloodarena.local';
 // ── Secret token — InfinityFree theke call korte lagbe ───────
 // Render Dashboard e Environment Variable hisebe SET KORUN:
 // Key: API_SECRET   Value: (jekono strong password)
-const API_SECRET = process.env.API_SECRET || 'change-this-secret';
+const API_SECRET = process.env.API_SECRET || 'bloodarena2024';
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
@@ -35,7 +35,7 @@ app.post('/send-push', async function(req, res) {
         return res.status(403).json({ ok: false, msg: 'Unauthorized' });
     }
 
-    const { endpoint, p256dh, auth, title, body, url } = req.body;
+    const { endpoint, p256dh, auth, title, body, url, type } = req.body;
 
     if (!endpoint || !p256dh || !auth) {
         return res.status(400).json({ ok: false, msg: 'Missing subscription data' });
@@ -45,7 +45,8 @@ app.post('/send-push', async function(req, res) {
     const payload = JSON.stringify({
         title: title || 'Blood Arena',
         body:  body  || 'New notification',
-        url:   url   || '/'
+        url:   url   || '/',
+        type:  (type === 'emergency') ? 'emergency' : 'info'
     });
 
     try {
@@ -65,7 +66,7 @@ app.post('/send-push-bulk', async function(req, res) {
         return res.status(403).json({ ok: false, msg: 'Unauthorized' });
     }
 
-    const { subscriptions, title, body, url } = req.body;
+    const { subscriptions, title, body, url, type } = req.body;
 
     if (!subscriptions || !Array.isArray(subscriptions) || subscriptions.length === 0) {
         return res.status(400).json({ ok: false, msg: 'No subscriptions provided' });
@@ -74,7 +75,8 @@ app.post('/send-push-bulk', async function(req, res) {
     const payload = JSON.stringify({
         title: title || 'Blood Arena',
         body:  body  || 'New notification',
-        url:   url   || '/'
+        url:   url   || '/',
+        type:  (type === 'emergency') ? 'emergency' : 'info'
     });
 
     let sent = 0, failed = 0, expired = [];
@@ -105,3 +107,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
     console.log('Blood Arena Push Server running on port ' + PORT);
 });
+
