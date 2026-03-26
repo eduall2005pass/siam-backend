@@ -1,109 +1,171 @@
-/**
- * Blood Arena - Push Notification Server
- * Deploy on Render.com (Node.js)
- */
-
 const express = require('express');
-const webpush = require('web-push');
+const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
-// ── VAPID Keys (same as your vapid.php) ──────────────────────
-const VAPID_PUBLIC  = 'BP_teCkbEQBIZ4uFwI0lO3CfzA5Nhco6qB52uwjRLBOCQd1KPbSc-zRaGoWKvR8FGH6GNFclJDPiR2rqptkLK9U';
-const VAPID_PRIVATE = 'feIGaw3LoPdNfRD-32E9tf9W5mmDX9aUPrJ2JDLUAeE';
-const VAPID_SUBJECT = 'mailto:admin@bloodarena.local';
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GROQ_KEY = process.env.GROQ_API_KEY;
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
+const TAVILY_KEY = process.env.TAVILY_API_KEY;
+const WEATHER_KEY = process.env.OPENWEATHER_API_KEY;
 
-// ── Secret token — InfinityFree theke call korte lagbe ───────
-// Render Dashboard e Environment Variable hisebe SET KORUN:
-// Key: API_SECRET   Value: (jekono strong password)
-const API_SECRET = process.env.API_SECRET || 'bloodarena2024';
+// ─── Gemini 2.5 Flash ───────────────────────────────────────────
+async function callGemini(messages, imageBase64 = null) {
+  const lastMsg = messages[messages.length - 1].content;
+  const history = messages.slice(0, -1).map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
+  const parts = [];
+  if (imageBase64) {
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
+  }
+  parts.push({ text: lastMsg });
 
-// ── Health check ─────────────────────────────────────────────
-app.get('/', function(req, res) {
-    res.json({ status: 'ok', service: 'Blood Arena Push Server' });
-});
-
-// ── Send push to one subscription ────────────────────────────
-// POST /send-push
-// Body: { secret, endpoint, p256dh, auth, title, body, url }
-app.post('/send-push', async function(req, res) {
-    // Auth check
-    if (req.body.secret !== API_SECRET) {
-        return res.status(403).json({ ok: false, msg: 'Unauthorized' });
+  const res = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${GEMINI_KEY}`,
+    {
+      systemInstruction: {
+        parts: [{ text: 'তুমি Siam AI। তুমি বাংলায় কথা বলো। User যে ভাষায় কথা বলবে সেই ভাষায় উত্তর দাও।' }]
+      },
+      contents: [...history, { role: 'user', parts }]
     }
+  );
+  return res.data.candidates[0].content.parts[0].text;
+}
 
-    const { endpoint, p256dh, auth, title, body, url, type } = req.body;
+// ─── Groq Llama 3.3 (Fallback 1) ────────────────────────────────
+async function callGroq(messages) {
+  const res = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: 'তুমি Siam AI। User যে ভাষায় লিখবে সেই ভাষায় উত্তর দাও।' },
+        ...messages
+      ],
+      max_tokens: 2048
+    },
+    { headers: { Authorization: `Bearer ${GROQ_KEY}` } }
+  );
+  return res.data.choices[0].message.content;
+}
 
-    if (!endpoint || !p256dh || !auth) {
-        return res.status(400).json({ ok: false, msg: 'Missing subscription data' });
-    }
+// ─── DeepSeek (Fallback 2) ───────────────────────────────────────
+async function callDeepSeek(messages) {
+  const res = await axios.post(
+    'https://api.deepseek.com/v1/chat/completions',
+    {
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: 'তুমি Siam AI। User যে ভাষায় লিখবে সেই ভাষায় উত্তর দাও।' },
+        ...messages
+      ]
+    },
+    { headers: { Authorization: `Bearer ${DEEPSEEK_KEY}` } }
+  );
+  return res.data.choices[0].message.content;
+}
 
-    const subscription = { endpoint, keys: { p256dh, auth } };
-    const payload = JSON.stringify({
-        title: title || 'Blood Arena',
-        body:  body  || 'New notification',
-        url:   url   || '/',
-        type:  (type === 'emergency') ? 'emergency' : 'info'
-    });
+// ─── /chat ───────────────────────────────────────────────────────
+app.post('/chat', async (req, res) => {
+  const { messages, imageBase64 } = req.body;
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array required' });
+  }
 
+  try {
+    const reply = await callGemini(messages, imageBase64);
+    return res.json({ reply, model: 'Gemini 2.5 Flash' });
+  } catch (e1) {
+    console.error('Gemini error:', e1.message);
     try {
-        await webpush.sendNotification(subscription, payload);
-        res.json({ ok: true });
-    } catch (err) {
-        // 404/410 = expired subscription
-        res.json({ ok: false, expired: (err.statusCode === 404 || err.statusCode === 410), msg: err.message });
+      const reply = await callGroq(messages);
+      return res.json({ reply, model: 'Groq Llama 3.3' });
+    } catch (e2) {
+      console.error('Groq error:', e2.message);
+      try {
+        const reply = await callDeepSeek(messages);
+        return res.json({ reply, model: 'DeepSeek' });
+      } catch (e3) {
+        return res.status(500).json({ error: 'সব AI fail করেছে', detail: e3.message });
+      }
     }
+  }
 });
 
-// ── Send push to multiple subscriptions ──────────────────────
-// POST /send-push-bulk
-// Body: { secret, subscriptions: [{endpoint, p256dh, auth}], title, body, url }
-app.post('/send-push-bulk', async function(req, res) {
-    if (req.body.secret !== API_SECRET) {
-        return res.status(403).json({ ok: false, msg: 'Unauthorized' });
-    }
-
-    const { subscriptions, title, body, url, type } = req.body;
-
-    if (!subscriptions || !Array.isArray(subscriptions) || subscriptions.length === 0) {
-        return res.status(400).json({ ok: false, msg: 'No subscriptions provided' });
-    }
-
-    const payload = JSON.stringify({
-        title: title || 'Blood Arena',
-        body:  body  || 'New notification',
-        url:   url   || '/',
-        type:  (type === 'emergency') ? 'emergency' : 'info'
+// ─── /search ─────────────────────────────────────────────────────
+app.post('/search', async (req, res) => {
+  const { query } = req.body;
+  try {
+    const r = await axios.post('https://api.tavily.com/search', {
+      api_key: TAVILY_KEY,
+      query,
+      max_results: 5,
+      include_answer: true
     });
-
-    let sent = 0, failed = 0, expired = [];
-
-    const results = await Promise.allSettled(
-        subscriptions.map(async function(sub) {
-            const subscription = {
-                endpoint: sub.endpoint,
-                keys: { p256dh: sub.p256dh, auth: sub.auth }
-            };
-            try {
-                await webpush.sendNotification(subscription, payload);
-                sent++;
-            } catch (err) {
-                failed++;
-                if (err.statusCode === 404 || err.statusCode === 410) {
-                    expired.push(sub.endpoint);
-                }
-            }
-        })
-    );
-
-    res.json({ ok: true, sent, failed, expired_endpoints: expired });
+    res.json({
+      answer: r.data.answer,
+      results: r.data.results.map(x => ({
+        title: x.title,
+        url: x.url,
+        content: x.content.slice(0, 300)
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-// ── Start ─────────────────────────────────────────────────────
+// ─── /weather ────────────────────────────────────────────────────
+app.get('/weather', async (req, res) => {
+  const city = req.query.city || 'Dhaka';
+  try {
+    const r = await axios.get(
+      `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${WEATHER_KEY}&units=metric&lang=bn`
+    );
+    const d = r.data;
+    res.json({
+      city: d.name,
+      country: d.sys.country,
+      temp: d.main.temp,
+      feels_like: d.main.feels_like,
+      humidity: d.main.humidity,
+      description: d.weather[0].description,
+      icon: d.weather[0].icon,
+      wind: d.wind.speed
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── /translate ──────────────────────────────────────────────────
+app.post('/translate', async (req, res) => {
+  const { text, to } = req.body;
+  try {
+    const messages = [{ role: 'user', content: `Translate this to ${to || 'Bengali'}: "${text}". Reply ONLY with the translation.` }];
+    const reply = await callGemini(messages);
+    res.json({ translation: reply });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── /health ─────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    status: 'running',
+    app: 'Siam 2.5.8',
+    message: 'Backend চলছে! ✅'
+  });
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, function() {
-    console.log('Blood Arena Push Server running on port ' + PORT);
+app.listen(PORT, () => {
+  console.log(`Siam 2.5.8 Backend running on port ${PORT} ✅`);
 });
