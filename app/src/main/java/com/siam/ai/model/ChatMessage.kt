@@ -8,12 +8,4 @@ data class ChatMessage(
     val isUser: Boolean = true,
     val timestamp: LocalDateTime = LocalDateTime.now(),
     val isLoading: Boolean = false
-)
-
-data class ChatSession(
-    val id: String = "",
-    val title: String = "",
-    val messages: List<ChatMessage> = emptyList(),
-    val createdAt: LocalDateTime = LocalDateTime.now(),
-    val updatedAt: LocalDateTime = LocalDateTime.now()
-)
+))
