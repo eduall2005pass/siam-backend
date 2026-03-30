@@ -24,7 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontSize
+import androidx.compose.ui.text.font.14.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.siam.ai.model.ChatMessage

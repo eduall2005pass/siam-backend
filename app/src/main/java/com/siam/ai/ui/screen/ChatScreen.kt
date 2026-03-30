@@ -34,7 +34,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     LaunchedEffect(drawerOpen) {
-        drawerState.animateTo(if (drawerOpen) DrawerValue.Open else DrawerValue.Closed)
+        drawerState.open() DrawerValue.Open else DrawerValue.Closed)
     }
 
     LaunchedEffect(messages.size) {
